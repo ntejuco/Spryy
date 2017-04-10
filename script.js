@@ -27,7 +27,8 @@ const credentials = JSON.parse(fs.readFileSync('credentials.js', 'utf8'));
 const 
   GOOGLE_CSE_KEY = credentials.googleKey,
   VALIDATION_TOKEN = credentials.validationToken,
-  APP_KEY = credentials.appSecret;
+  APP_SECRET = credentials.appSecret,
+  PAGE_ACCESS_TOKEN = credentials.pageAccessToken;
 
 
 // Validate Facebook webhook
@@ -69,8 +70,6 @@ app.post('/webhook', function (req, res) {
       });
     });
 
-    // Assume all went well.
-    //
     res.sendStatus(200);
   }
 });
@@ -90,7 +89,7 @@ function verifyRequestSignature(req, res, buf) {
     var method = elements[0];
     var signatureHash = elements[1];
 
-    var expectedHash = crypto.createHmac('sha1', APP_KEY)
+    var expectedHash = crypto.createHmac('sha1', APP_SECRET)
                         .update(buf)
                         .digest('hex');
 
@@ -121,7 +120,7 @@ function receivedMessage(event) {
   var quickReply = message.quick_reply;
 
   if (isEcho) {
-    // Just logging message echoes to console
+    // Logging message echoes to console
     console.log("Received echo for message %s and app %d with metadata %s", 
       messageId, appId, metadata);
     return;
@@ -138,7 +137,7 @@ function receivedMessage(event) {
   if (messageText) {
     searchForProductLinks(senderID, messageText);
   } else if (messageAttachments) {
-  	processAttachment(senderID, messageAttachments);
+  	processAttachment(senderID, messageAttachments[0]);
     sendTextMessage(senderID, "Message with attachment received");
   }
 }
@@ -228,17 +227,16 @@ function imageSearch(recipientID, imageSource){
   request(options, function (err, res, body) {
   	// If no error from Google Image Search, scrape best guess 
   	// from HTML then query Google CSE  
-
+  	console.log(body);
     if (!err){ 
   	  jsdom.env(
-        html,
+        body,
  	    ["http://code.jquery.com/jquery.js"],
   	    function (err, window) {
           searchForProductLinks(recipientID, window.$("a._gUb").text());
   	    }
       );
   	}
-
   });
 }
 
@@ -253,26 +251,60 @@ function searchForProductLinks(recipientID, searchQuery){
   var options = {
     url: 'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery,
   };
-  titles = [];
-  links = [];
+  var titles = [];
+  var links = [];
   request(options, function (err, res, body) {
     if (!err){
-  	  searchItems = JSON.parse(body).items;
-  	  for (var i=0; i<searchItems.length; i++) {
-  	    titles.push(searchItems[i].title);
-  		links.push(searchItems[i].link);
+  	  var searchItems = JSON.parse(body).items;
+  	  if (searchItems) {
+  	    for (var i=0; i<Math.min(searchItems.length, 3); i++) {
+  	      titles.push(searchItems[i].title);
+  		  links.push(searchItems[i].link);
+  		}
   	  }
+  	  // if search failed to find a suitable link
+
+  	  if (titles.length == 0) {
+  	    sendTextMessage(recipientID, "Oops, we can't determine what that product is");
+      } else {
+
+      	// loop through links found and return title and address
+      	createListTemplate(recipientID, titles, links);
+      } 
   	  console.log(titles);
-  	}
+  	} else {
+
+  	// failed to connect to Google CSE
+  	sendTextMessage(recipientID, "Oops, something went wrong on our end");
+    } 
   });
-  if (title.length == 0) {
-  	sendTextMessage(recipientID, "Oops, we can't determine what that product is");
-  } else {
-  	for (var i=0; i<title.length; i++){
-  	  sendTextMessage(recipientID, title[i]);
-  	  sendTextMessage(recipientID, link[i])
-  	}
+}
+
+// build JSON for list template
+function createListTemplate(recipientID, titles, links) {
+
+  // build message payload JSON
+  var payload;
+  for (var i=0; i<titles.length; i++){
+    sendTextMessage(recipientID, titles[i] + "\n\n" + links[i]);
   }
+
+  var messageData = {
+  	recipient : {
+  	  id: recipientID
+  	},
+  	message: {
+  	  attachment: {
+  	    type: "template",
+  	    payload : {
+  	      template_type : "list",
+  	      top_element_style : "compact"
+  	    }
+  	  }
+  	}
+  };
+  // append payload to message wrapper
+  //messageData.message.payload = messagePayload;
 }
 
 // Start the server
