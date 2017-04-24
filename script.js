@@ -12,7 +12,8 @@ const
   request = require('request'),
   jsdom = require('jsdom'),
   bodyParser = require("body-parser"),
-  fs = require('fs');
+  fs = require('fs'),
+  async = require('async');
 
 var app = express();
 app.set('port', process.env.PORT || 5000);
@@ -227,13 +228,12 @@ function imageSearch(recipientID, imageSource){
   request(options, function (err, res, body) {
   	// If no error from Google Image Search, scrape best guess 
   	// from HTML then query Google CSE  
-  	console.log(body);
     if (!err){ 
   	  jsdom.env(
         body,
  	    ["http://code.jquery.com/jquery.js"],
   	    function (err, window) {
-          searchForProductLinks(recipientID, window.$("a._gUb").text());
+          searchForProductLinks(recipientID, window.$( "a._gUb" ).text());
   	    }
       );
   	}
@@ -271,7 +271,6 @@ function searchForProductLinks(recipientID, searchQuery){
       	// loop through links found and return title and address
       	createListTemplate(recipientID, titles, links);
       } 
-  	  console.log(titles);
   	} else {
 
   	// failed to connect to Google CSE
@@ -280,13 +279,62 @@ function searchForProductLinks(recipientID, searchQuery){
   });
 }
 
-// build JSON for list template
-function createListTemplate(recipientID, titles, links) {
+// gets image for list template
+function getImageURL(recipientID, titles, links) {
+  console.log("get image url called");
+  var imageLinks = [];
+  async.each(links, 
+  	function(link, callback) {
+  	  var options = {
+        url: link,
+        headers: { 'user-agent': 'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11' }
+  	  };
+  	  request(options, function(err, res, body) {
+  	  	console.log(body)
+        if (!err){
+          console.log("Has received Amazon data");
+  	      jsdom.env(body,["http://code.jquery.com/jquery.js"],
+  	      				function (err, window) {
+  	          imageLinks.push(window.$( "#landingImage" ).attr('src'));
+  	          callback();
+  	        }
+          );
+        } else {
+        	callback(err);
+        }
+      });
+  	},
+  	function(err) {
+  		console.log(imageLinks);
+  		createListTemplate(recipientID, titles, links, imageLinks);
+  	}
+  );
+}
 
-  // build message payload JSON
-  var payload;
+// build JSON for list template
+function createListTemplate(recipientID, titles, links, imageLinks) {
+
+  // build message payload JSON for each item found
+  console.log("Create list called");
+  var messageElements = [];
   for (var i=0; i<titles.length; i++){
-    sendTextMessage(recipientID, titles[i] + "\n\n" + links[i]);
+
+  	var item = {
+  	  title: titles[i],
+  	  image_url : imageLinks[i],
+  	  default_action: {
+  	  type: "web_url",
+  	  url: links[i]
+  	  },
+  	  buttons: [
+  	    {
+  	      title: "Buy Now",
+  	      type: "web_url",
+  	      url: links[i]
+  	    }
+  	  ]
+  	}
+  	messageElements.push(item);
   }
 
   var messageData = {
@@ -303,8 +351,10 @@ function createListTemplate(recipientID, titles, links) {
   	  }
   	}
   };
-  // append payload to message wrapper
-  //messageData.message.payload = messagePayload;
+  // append elements to message wrapper
+  messageData.message.attachment.payload.elements = messageElements;
+  console.log(messageElements);
+  callSendAPI(messageData);
 }
 
 // Start the server
