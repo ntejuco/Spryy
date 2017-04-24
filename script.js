@@ -269,7 +269,7 @@ function searchForProductLinks(recipientID, searchQuery){
       } else {
 
       	// loop through links found and return title and address
-      	createListTemplate(recipientID, titles, links);
+      	getImageURL(recipientID, titles, links);
       } 
   	} else {
 
