@@ -13,13 +13,10 @@ const
   jsdom = require('jsdom'),
   bodyParser = require("body-parser"),
   fs = require('fs'),
-  async = require('async');
+  async = require('async'),
+  vision = require('@google-cloud/vision');
 
-var app = express();
-app.set('port', process.env.PORT || 5000);
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
-app.use(bodyParser.json({ verify: verifyRequestSignature }));
+
 
 // Open file containing secret keys
 const credentials = JSON.parse(fs.readFileSync('credentials.js', 'utf8'));
@@ -29,7 +26,21 @@ const
   GOOGLE_CSE_KEY = credentials.googleKey,
   VALIDATION_TOKEN = credentials.validationToken,
   APP_SECRET = credentials.appSecret,
-  PAGE_ACCESS_TOKEN = credentials.pageAccessToken;
+  PAGE_ACCESS_TOKEN = credentials.pageAccessToken,
+  cloudProjectID = credentials.cloudProjectID;
+
+
+
+const app = express();
+app.set('port', process.env.PORT || 5000);
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+app.use(bodyParser.json({ verify: verifyRequestSignature }));
+
+const visionClient = vision({
+	projectId: cloudProjectID
+});
+
 
 
 // Validate Facebook webhook
@@ -221,23 +232,14 @@ function processAttachment(recipientID, messageAttachments){
 }
 
 function imageSearch(recipientID, imageSource){
-  var options = {
-    url: 'https://images.google.com/searchbyimage?image_url=www.nathantejuco.com/spry/' + imageSource,
-	headers: { 'user-agent': 'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11' }
-	};
-  request(options, function (err, res, body) {
-  	// If no error from Google Image Search, scrape best guess 
-  	// from HTML then query Google CSE  
-    if (!err){ 
-  	  jsdom.env(
-        body,
- 	    ["http://code.jquery.com/jquery.js"],
-  	    function (err, window) {
-          searchForProductLinks(recipientID, window.$( "a._gUb" ).text());
-  	    }
-      );
-  	}
-  });
+  visionClient.detectLabels(imageSource)
+    .then((results) => {
+      const labels = results[0];
+      labels.forEach((label) => console.log(label));
+    })
+    .catch((err) => {
+      console.log("ERROR", err);
+    });
 }
 
 /*
