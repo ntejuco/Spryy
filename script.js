@@ -1,35 +1,25 @@
 /*
- * Spyy Search Node.js backend
+ * Spryy Search Node.js backend
  *
  * Created by Nathan Tejuco
  * 
- * Last updated April 8 2017
+ * Last updated May 8 2017
  */
+
 'use strict';
 
 const 
   express = require('express'),
-  request = require('request'),
-  jsdom = require('jsdom'),
+  request = require('request').defaults({ encoding:null}),
   bodyParser = require("body-parser"),
   fs = require('fs'),
   async = require('async'),
-  vision = require('@google-cloud/vision');
+  queryString = require('querystring');
 
-
-
-// Open file containing secret keys
-const credentials = JSON.parse(fs.readFileSync('credentials.js', 'utf8'));
-
-// Extract keys from file
-const 
-  GOOGLE_CSE_KEY = credentials.googleKey,
-  VALIDATION_TOKEN = credentials.validationToken,
-  APP_SECRET = credentials.appSecret,
-  PAGE_ACCESS_TOKEN = credentials.pageAccessToken,
-  cloudProjectID = credentials.cloudProjectID;
-
-
+var vision = require('@google-cloud/vision')({
+    projectId: 'spryy-166219',
+    keyFilename: 'Spryy-69c3a95fb320.json'
+});
 
 const app = express();
 app.set('port', process.env.PORT || 5000);
@@ -37,11 +27,17 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(bodyParser.json({ verify: verifyRequestSignature }));
 
-const visionClient = vision({
-	projectId: cloudProjectID
-});
+// Open file containing secret keys
+const credentials = JSON.parse(fs.readFileSync('credentials.js', 'utf8'));
 
-
+// Extract keys from file
+const 
+  GOOGLE_CSE_KEY = credentials.googleCSEKey,
+  GOOGLE_CSE_KEY_2 = credentials.googleCSEKey2,
+  VALIDATION_TOKEN = credentials.validationToken,
+  APP_SECRET = credentials.appSecret,
+  PAGE_ACCESS_TOKEN = credentials.pageAccessToken,
+  cloudProjectID = credentials.cloudProjectID;
 
 // Validate Facebook webhook
 app.get('/webhook', function(req, res) {
@@ -150,7 +146,6 @@ function receivedMessage(event) {
     searchForProductLinks(senderID, messageText);
   } else if (messageAttachments) {
   	processAttachment(senderID, messageAttachments[0]);
-    sendTextMessage(senderID, "Message with attachment received");
   }
 }
 
@@ -232,14 +227,23 @@ function processAttachment(recipientID, messageAttachments){
 }
 
 function imageSearch(recipientID, imageSource){
-  visionClient.detectLabels(imageSource)
-    .then((results) => {
-      const labels = results[0];
-      labels.forEach((label) => console.log(label));
-    })
-    .catch((err) => {
-      console.log("ERROR", err);
-    });
+  request.get(imageSource, function(err, response, body){
+    if (!err && response.statusCode == 200) {
+      var imageBase64 = new Buffer(body,'base64');
+      vision.detectLogos(imageBase64, function(err, logos, apiResponse) {
+  	    if (!err) {
+          if (logos[0] == undefined) {
+          	sendTextMessage(recipientID, "Sorry, we can not determine what that is");
+          } else {
+          searchForProductLinks(recipientID, logos[0]);
+          }
+  	    } else {
+  	      console.log("ERROR: ");
+  	      console.log(err);
+  	    }
+      });
+    }
+  });
 }
 
 /*
@@ -250,13 +254,14 @@ function imageSearch(recipientID, imageSource){
  */
 
 function searchForProductLinks(recipientID, searchQuery){
+  searchQuery = queryString.escape(searchQuery);
   var options = {
-    url: 'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery,
+    url: 'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY_2+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery,
   };
   var titles = [];
   var links = [];
   request(options, function (err, res, body) {
-    if (!err){
+    if (!err) {
   	  var searchItems = JSON.parse(body).items;
   	  if (searchItems) {
   	    for (var i=0; i<Math.min(searchItems.length, 3); i++) {
@@ -271,7 +276,7 @@ function searchForProductLinks(recipientID, searchQuery){
       } else {
 
       	// loop through links found and return title and address
-      	getImageURL(recipientID, titles, links);
+      	getImageURL(recipientID, titles.reverse(), links.reverse());
       } 
   	} else {
 
@@ -282,45 +287,46 @@ function searchForProductLinks(recipientID, searchQuery){
 }
 
 // gets image for list template
+// ༼ノಠل͟ಠ༽ノ ︵ ┻━━┻
+
 function getImageURL(recipientID, titles, links) {
-  console.log("get image url called");
   var imageLinks = [];
-  async.each(links, 
-  	function(link, callback) {
-  	  var options = {
-        url: link,
-        headers: { 'user-agent': 'Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11' }
+  var asyncTasks = [];
+  for (var i=0; i<links.length; i++) {
+  	imageLinks[i] = undefined;
+  }
+  links.forEach(function(link,index) {
+  	var searchQuery = queryString.escape(titles[index]);
+    asyncTasks.push(function(callback) {
+      var options = {
+        url:'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY_2+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery+'&searchType=image&alt=json'
   	  };
+
   	  request(options, function(err, res, body) {
-  	  	console.log(body)
-        if (!err){
-          console.log("Has received Amazon data");
-  	      jsdom.env(body,["http://code.jquery.com/jquery.js"],
-  	      				function (err, window) {
-  	          imageLinks.push(window.$( "#landingImage" ).attr('src'));
-  	          callback();
-  	        }
-          );
+        if (!err && JSON.parse(body).items != undefined 
+        		&& JSON.parse(body).items.length > 0) {
+          imageLinks[index] = JSON.parse(body).items[0].link;
+          callback();
         } else {
-        	callback(err);
+          callback(err);
         }
       });
-  	},
-  	function(err) {
-  		console.log(imageLinks);
-  		createListTemplate(recipientID, titles, links, imageLinks);
-  	}
-  );
+    })
+  })
+  async.parallel(asyncTasks, function(){
+    createListTemplate(recipientID, titles, links, imageLinks);
+  });
 }
 
 // build JSON for list template
 function createListTemplate(recipientID, titles, links, imageLinks) {
 
   // build message payload JSON for each item found
-  console.log("Create list called");
   var messageElements = [];
   for (var i=0; i<titles.length; i++){
-
+  	if (imageLinks[i] != undefined && imageLinks[i].length > 150) {
+  		imageLinks[i] = undefined;
+  	}
   	var item = {
   	  title: titles[i],
   	  image_url : imageLinks[i],
@@ -355,7 +361,6 @@ function createListTemplate(recipientID, titles, links, imageLinks) {
   };
   // append elements to message wrapper
   messageData.message.attachment.payload.elements = messageElements;
-  console.log(messageElements);
   callSendAPI(messageData);
 }
 
