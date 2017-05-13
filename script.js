@@ -230,13 +230,15 @@ function imageSearch(recipientID, imageSource){
   request.get(imageSource, function(err, response, body){
     if (!err && response.statusCode == 200) {
       var imageBase64 = new Buffer(body,'base64');
-      vision.detectLogos(imageBase64, function(err, logos, apiResponse) {
+      var visionDetectTypes = ['logos', 'similar'];
+      var options = {
+  	    verbose: true,
+  	    maxResults: 5,
+  	    types: visionDetectTypes
+	  };
+      vision.detect(imageBase64, options, function(err, visionResponse, apiResponse) {
   	    if (!err) {
-          if (logos[0] == undefined) {
-          	sendTextMessage(recipientID, "Sorry, we can not determine what that is");
-          } else {
-          searchForProductLinks(recipientID, logos[0]);
-          }
+  	      buildSearchQuery(recipientID, visionResponse);
   	    } else {
   	      console.log("ERROR: ");
   	      console.log(err);
@@ -246,23 +248,39 @@ function imageSearch(recipientID, imageSource){
   });
 }
 
+function buildSearchQuery(recipientID, visionResponse) {
+  var searchQuery = "";
+  var imageLogo = visionResponse.logos[0];
+  var imageEntities = visionResponse.similar.entities;
+  if (imageLogo) searchQuery += imageLogo.desc;
+  if (imageEntities) {
+  	for (var i=0; i < Math.min(2,imageEntities.length); i++) {
+	  searchQuery += " " + imageEntities[i];
+	}
+  }
+  console.log(searchQuery);
+  searchForProductLinks(recipientID, searchQuery);
+}
+
 /*
  * Queries Google CSE, domains searched are:
  *   amazon.com
  *   ebay.com
+ *	 *.myshopify.com
  * Page title and links are extracted and sent to user
  */
 
 function searchForProductLinks(recipientID, searchQuery){
   searchQuery = queryString.escape(searchQuery);
   var options = {
-    url: 'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY_2+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery,
+    url: 'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY+'&cx=011733113756967906305:ptssd3i06cq&fields=items(title,link)&q='+searchQuery,
   };
   var titles = [];
   var links = [];
   request(options, function (err, res, body) {
     if (!err) {
   	  var searchItems = JSON.parse(body).items;
+  	  console.log(searchItems);
   	  if (searchItems) {
   	    for (var i=0; i<Math.min(searchItems.length, 3); i++) {
   	      titles.push(searchItems[i].title);
@@ -299,7 +317,7 @@ function getImageURL(recipientID, titles, links) {
   	var searchQuery = queryString.escape(titles[index]);
     asyncTasks.push(function(callback) {
       var options = {
-        url:'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY_2+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery+'&searchType=image&alt=json'
+        url:'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery+'&searchType=image&alt=json'
   	  };
 
   	  request(options, function(err, res, body) {
