@@ -39,6 +39,8 @@ const
   PAGE_ACCESS_TOKEN = credentials.pageAccessToken,
   cloudProjectID = credentials.cloudProjectID;
 
+  var time = Date.now();
+
 // Validate Facebook webhook
 app.get('/webhook', function(req, res) {
   if (req.query['hub.mode'] === 'subscribe' &&
@@ -52,6 +54,7 @@ app.get('/webhook', function(req, res) {
 });
 
 app.post('/webhook', function (req, res) {
+  time = Date.now();
   var data = req.body;
 
   // Make sure this is a page subscription
@@ -227,6 +230,7 @@ function processAttachment(recipientID, messageAttachments){
 }
 
 function imageSearch(recipientID, imageSource){
+  time = Date.now();
   request.get(imageSource, function(err, response, body){
     if (!err && response.statusCode == 200) {
       var imageBase64 = new Buffer(body,'base64');
@@ -249,6 +253,8 @@ function imageSearch(recipientID, imageSource){
 }
 
 function buildSearchQuery(recipientID, visionResponse) {
+  console.log("Image understanding took: " + (Date.now() - time) / 1000 + "seconds");
+  time = Date.now();
   var searchQuery = "";
   var imageLogo = visionResponse.logos[0];
   var imageEntities = visionResponse.similar.entities;
@@ -273,20 +279,21 @@ function buildSearchQuery(recipientID, visionResponse) {
 function searchForProductLinks(recipientID, searchQuery){
   searchQuery = queryString.escape(searchQuery);
   var options = {
-    url: 'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY+'&cx=011733113756967906305:ptssd3i06cq&fields=items(title,link)&q='+searchQuery,
+    url: 'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY_2+'&cx=011733113756967906305:ptssd3i06cq&fields=items(title,link)&q='+searchQuery,
   };
   var titles = [];
   var links = [];
   request(options, function (err, res, body) {
     if (!err) {
   	  var searchItems = JSON.parse(body).items;
-  	  console.log(searchItems);
   	  if (searchItems) {
   	    for (var i=0; i<Math.min(searchItems.length, 3); i++) {
   	      titles.push(searchItems[i].title);
   		  links.push(searchItems[i].link);
   		}
   	  }
+  	  console.log("Finding links took: " + (Date.now() - time) / 1000 + "seconds");
+  	  time = Date.now();
   	  // if search failed to find a suitable link
 
   	  if (titles.length == 0) {
@@ -317,12 +324,10 @@ function getImageURL(recipientID, titles, links) {
   	var searchQuery = queryString.escape(titles[index]);
     asyncTasks.push(function(callback) {
       var options = {
-        url:'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery+'&searchType=image&alt=json'
+        url:'https://www.googleapis.com/customsearch/v1?key='+GOOGLE_CSE_KEY_2+'&cx=011733113756967906305:ptssd3i06cq&q='+searchQuery+'&searchType=image&alt=json'
   	  };
-
   	  request(options, function(err, res, body) {
-        if (!err && JSON.parse(body).items != undefined 
-        		&& JSON.parse(body).items.length > 0) {
+        if (!err && JSON.parse(body).items != undefined && JSON.parse(body).items.length > 0) {
           imageLinks[index] = JSON.parse(body).items[0].link;
           callback();
         } else {
@@ -338,6 +343,7 @@ function getImageURL(recipientID, titles, links) {
 
 // build JSON for list template
 function createListTemplate(recipientID, titles, links, imageLinks) {
+  console.log("Finding link images took: " + (Date.now() - time) / 1000 + "seconds");
 
   // build message payload JSON for each item found
   var messageElements = [];
